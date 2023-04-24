@@ -1,0 +1,83 @@
+## DOES NOT WORK AT THE MOMENT ##
+
+Bootstrap: docker
+From: ubuntu:20.04
+# From: nvidia/cuda:11.4.2-devel-ubuntu20.04
+
+%environment
+    export PLUMED_VERSION=2.7.3
+    export GMX_VERSION=2021.4
+
+%files
+    /home/domain/data/silwer/gpcr_martini2/scripts/gmx /usr/local/bin/gmx
+
+# Install python3
+%post
+    apt-get update -y 
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    python3 \
+    python3-pip
+
+# Install latest CMAKE
+%post
+    pip3 install cmake
+
+# Install dependencies for gromacs
+%post
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        build-essential \
+        ca-certificates \
+        libblas-dev \
+        liblapack-dev \
+        ninja-build \
+        perl \
+        wget
+
+# Install dependencies for mpi
+%post
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+       openmpi-bin \
+       libopenmpi-dev 
+
+# Install dependencies for plumed
+%post
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+       libfftw3-dev \
+       libz-dev \
+       xxd  
+
+
+# Build plumed with MPI
+%post
+    cd /
+    mkdir -p /var/tmp && wget -q -nc --no-check-certificate -P /var/tmp https://github.com/plumed/plumed2/releases/download/v${PLUMED_VERSION}/plumed-${PLUMED_VERSION}.tgz
+    mkdir -p /var/tmp && tar -x -f /var/tmp/plumed-${PLUMED_VERSION}.tgz -C /var/tmp -z
+    cd /var/tmp/plumed-${PLUMED_VERSION}/
+    ./configure --prefix=/usr/local --enable-mpi
+    make -j $(nproc)
+    make install
+    rm -rf /var/tmp/${PLUMED_VERSION}/ /var/tmp/plumed-${PLUMED_VERSION}.tgz
+
+# ftp://ftp.gromacs.org/pub/gromacs/gromacs-2021.4.tar.gz
+%post
+    cd /
+    mkdir -p /var/tmp && wget -q -nc --no-check-certificate -P /var/tmp ftp://ftp.gromacs.org/pub/gromacs/gromacs-${GMX_VERSION}.tar.gz
+    mkdir -p /var/tmp && tar -x -f /var/tmp/gromacs-${GMX_VERSION}.tar.gz -C /var/tmp -z
+    cd /var/tmp/gromacs-${GMX_VERSION}/
+    plumed-patch -p -e gromacs-${GMX_VERSION}
+
+	for SIMD in AVX2_256 # AVX_256 SSE4.1 SSE2
+      do 
+
+      mkdir -p /var/tmp/gromacs-${GMX_VERSION}/build.${SIMD}
+      cd /var/tmp/gromacs-${GMX_VERSION}/build.${SIMD} 
+      cmake -D GMX_SIMD=${SIMD} -D GMX_OPENMP=ON -D GMX_MPI=ON -D GMX_GPU=OFF -D GMX_DOUBLE=OFF -D GMX_BUILD_OWN_FFTW=ON -D CMAKE_INSTALL_PREFIX=/opt/gromacs/gromacs.${SIMD} /var/tmp/gromacs-${GMX_VERSION}
+      cmake --build /var/tmp/gromacs-${GMX_VERSION}/build.${SIMD} --target all -- -j$(nproc)
+      cmake --build /var/tmp/gromacs-${GMX_VERSION}/build.${SIMD} --target install -- -j$(nproc)
+
+   done
+        
+   rm -rf /var/tmp/gromacs-${GMX_VERSION} /var/tmp/gromacs-${GMX_VERSION}.tar.gz
+
+%runscript
+    gmx "$@"
