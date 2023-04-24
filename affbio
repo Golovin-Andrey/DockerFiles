@@ -1,0 +1,37 @@
+Bootstrap: docker
+From: ubuntu:18.04
+
+# Install python2
+%post
+    apt-get update -y 
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        python \
+        curl \
+        ca-certificates 
+    
+# install pip for python2
+%post
+    curl https://bootstrap.pypa.io/pip/2.7/get-pip.py | python2
+
+
+# Install dependencies for affbio
+%post
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        build-essential \
+        python-dev \
+        openmpi-bin \
+        openssh-client \
+        libopenmpi-dev \
+        libhdf5-dev \
+        gromacs \
+        pymol \
+        imagemagick
+
+# Install affbio
+%post
+    pip2 install -U numpy
+    pip2 install affbio
+    
+# call affbio
+%runscript
+    affbio "$@"

@@ -1,0 +1,82 @@
+Bootstrap: docker
+# From: ubuntu:20.04
+From: nvidia/cuda:11.6.0-devel-ubuntu20.04
+
+%files
+    /home/domain/data/prog/amber/AmberTools20.tar.bz2 /tmp
+    /home/domain/data/prog/amber/Amber20.tar.bz2 /tmp
+
+%environment
+    AMBERHOME=/opt/amber20/
+    PATH="$AMBERHOME/bin:$PATH"
+    LD_LIBRARY_PATH="$AMBERHOME/lib:$LD_LIBRARY_PATH"
+    PERL5LIB="$AMBERHOME/lib/perl:$PERL5LIB"
+    PYTHONPATH="$AMBERHOME/lib/python3.9/site-packages:$PYTHONPATH"
+    QUICK_BASIS="$AMBERHOME/AmberTools/src/quick/basis"
+
+    export AMBERHOME PATH LD_LIBRARY_PATH PERL5LIB PYTHONPATH QUICK_BASIS
+
+# Install python3
+%post
+    apt-get update -y 
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    python3 \
+    python3-pip \
+
+# Install build dependencies
+%post
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        build-essential \
+        ca-certificates \
+        wget 
+
+# Install build dependencies
+%post
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    python-is-python3 \
+    tcsh \
+    make \
+    gcc \
+    gfortran \
+    flex \
+    bison \
+    patch \
+    bc \
+    xorg-dev \
+    libbz2-dev \
+    wget \
+    libboost-all-dev \
+    libreadline-dev
+ 
+# Install latest CMAKE
+%post
+    pip3 install cmake
+
+# Install dependencies for mpi
+%post
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+       openmpi-bin \
+       libopenmpi-dev \
+       openssh-client
+
+# ftp://ftp.gromacs.org/pub/gromacs/gromacs-2021.5.tar.gz
+%post
+    cd ${SINGULARITY_CONTAINER}/tmp
+    tar -xf AmberTools20.tar.bz2
+    tar -xf Amber20.tar.bz2 
+    cd amber20_src
+    echo y | ./update_amber --upgrade
+    mkdir -p ${SINGULARITY_CONTAINER}/tmp/build && cd ${SINGULARITY_CONTAINER}/tmp/build
+    cmake ${SINGULARITY_CONTAINER}/tmp/amber20_src/ -DCMAKE_INSTALL_PREFIX=/opt/amber20 -DCOMPILER=GNU -DMPI=TRUE -D OPENMP=TRUE -DCUDA=TRUE -DNCCL=TRUE -DDOWNLOAD_MINICONDA=TRUE -DMINICONDA_USE_PY3=TRUE
+#     cmake ${SINGULARITY_CONTAINER}/tmp/amber20_src/ -DCMAKE_INSTALL_PREFIX=/opt/amber20 -DCOMPILER=GNU -DMPI=TRUE -D OPENMP=TRUE -DDOWNLOAD_MINICONDA=TRUE -DMINICONDA_USE_PY3=TRUE
+    # Dirty hack because of conda linker bug
+    # https://github.com/ContinuumIO/anaconda-issues/issues/11152
+    mv CMakeFiles/miniconda/install/compiler_compat/ld CMakeFiles/miniconda/install/compiler_compat/ld.bck
+    make -j 24
+#    make
+    make install
+
+    rm -rf ${SINGULARITY_CONTAINER}/tmp/Amber20.tar.bz2
+    rm -rf ${SINGULARITY_CONTAINER}/tmp/AmberTools20.tar.bz2
+    rm -rf ${SINGULARITY_CONTAINER}/tmp/build
+    rm -rf ${SINGULARITY_CONTAINER}/tmp/amber20_src
