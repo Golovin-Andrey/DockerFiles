@@ -1,2 +1,2 @@
 # DockerFiles
-Collection of docker files for simulation soft
+Collection of docker files for molecular dynamics simulation soft and more
