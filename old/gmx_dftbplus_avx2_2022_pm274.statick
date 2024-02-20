@@ -1,0 +1,118 @@
+Bootstrap: docker
+From: ubuntu:20.04
+#From: nvidia/cuda:11.6.0-devel-ubuntu20.04
+
+#%files
+#    /home/domain/data/silwer/gpcr_martini2/scripts/gmx /usr/local/bin/gmx
+
+# Install python3
+%post
+    apt-get update -y 
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    python3 \
+    python3-pip
+
+# Install latest CMAKE
+%post
+    pip3 install cmake
+
+# Install dependencies for gromacs
+%post
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        build-essential \
+        ca-certificates \
+        libblas-dev \
+        liblapack-dev \
+        ninja-build \
+        perl \
+        wget \
+        liblapack64-dev \
+        libblas64-dev \
+        git xxd \
+        gfortran \
+        libopenmpi-dev
+
+%post 
+   TMPDIR=${SINGULARITY_CONTAINER}/var/tmp
+   cd ${TMPDIR}
+   wget https://github.com/dftbplus/dftbplus/releases/download/21.2/dftbplus-21.2.tar.xz
+   tar xf dftbplus-21.2.tar.xz
+   cd ${TMPDIR}/dftbplus-21.2/
+   cmake -DWITH_API=TRUE -DBLAS_LIBRARY=/usr/lib/x86_64-linux-gnu/libblas64.a -DLAPACK_LIBRARY=/usr/lib/x86_64-linux-gnu/liblapack64.a -B _build .
+   cmake --build _build -- -j
+   cmake --install _build 
+   cp _build/src/dftbp/libdftbplus.a _build/external/mudpack/libmudpack.a  /usr/lib/x86_64-linux-gnu/
+
+#   TMPDIR=${SINGULARITY_CONTAINER}/var/tmp
+#   cd ${TMPDIR}
+#   wget https://github.com/dftbplus/dftbplus/releases/download/21.2/dftbplus-21.2.x86_64-linux.tar.xz
+#   tar xf dftbplus-21.2.x86_64-linux.tar.xz
+#   cp  dftbplus-21.2.x86_64-linux/lib64/libmudpack.a dftbplus-21.2.x86_64-linux/lib64/libdftbplus.a  /usr/lib/x86_64-linux-gnu/
+#   cp ./dftbplus-21.2.x86_64-linux/lib64/libs-dftd3.a /usr/lib/x86_64-linux-gnu/libdftd3.a
+
+%post 
+   TMPDIR=${SINGULARITY_CONTAINER}/var/tmp
+   cd ${TMPDIR}
+   git clone https://github.com/dftbplus/dftd3-lib
+   cd ${TMPDIR}/dftd3-lib
+   make
+   cp lib/libdftd3.a  /usr/lib/x86_64-linux-gnu/
+
+%post
+   PLUMED_VERSION=2.7.4
+   ls ${SINGULARITY_CONTAINER}/usr/local/bin
+   TMPDIR=${SINGULARITY_CONTAINER}/var/tmp
+    cd /
+    mkdir -p ${TMPDIR} && wget -q -nc --no-check-certificate -P ${TMPDIR} https://github.com/plumed/plumed2/releases/download/v${PLUMED_VERSION}/plumed-src-${PLUMED_VERSION}.tgz
+    mkdir -p ${TMPDIR} && tar -x -f ${TMPDIR}/plumed-src-${PLUMED_VERSION}.tgz -C ${TMPDIR} -z
+    cd ${TMPDIR}/plumed-${PLUMED_VERSION}
+    ./configure --prefix=${SINGULARITY_CONTAINER}/opt/plumed
+    make -j4
+    make install
+
+    
+
+
+
+
+
+%post   
+   #ls ${SINGULARITY_CONTAINER}/usr/local/bin
+   TMPDIR=${SINGULARITY_CONTAINER}/var/tmp
+    cd /
+    mkdir -p ${TMPDIR} && cd ${TMPDIR} && git clone https://github.com/tomaskubar/gromacs-dftbplus.git
+    cd ${TMPDIR}/gromacs-dftbplus
+    ln -s /opt/plumed/include/plumed/wrapper/Plumed.h 
+    
+    cat > Plumed.cmake  <<- EOM
+set(PLUMED_LOAD  "${SINGULARITY_CONTAINER}/opt/plumed/lib/libplumed.so" -ldl  ) 
+set(PLUMED_DEPENDENCIES  "${SINGULARITY_CONTAINER}/opt/plumed/libplumed.so")
+EOM
+    
+    cat > Plumed.in  <<- EOM
+PLUMED_LOAD="${SINGULARITY_CONTAINER}/opt/plumed/lib/libplumed.so" -ldl  
+PLUMED_DEPENDENCIES="${SINGULARITY_CONTAINER}/opt/plumed/libplumed.so"
+EOM
+
+	for SIMD in AVX2_256 
+      do 
+      cmake -DGMX_X11=OFF -DGMX_QMMM_PROGRAM=dftbplus -DGMX_DOUBLE=YES -DGMX_GPU=OFF -DGMX_DEFAULT_SUFFIX=OFF -DGMX_QMMM_DFTBPLUS_LIB=/usr/lib/x86_64-linux-gnu/  -DGMX_OPENMP=ON  -DGMX_PLUMED=ON -DGMX_BUILD_OWN_FFTW=ON -DGMX_THREAD_MPI=ON  -DGMX_BUILD_MDRUN_ONLY=Off  -DGMXAPI=off -DGMX_INSTALL_NBLIB_API=OFF
+
+echo "/usr/bin/c++  -O3 -DNDEBUG      CMakeFiles/gmx_objlib.dir/gmx.cpp.o CMakeFiles/gmx_objlib.dir/legacymodules.cpp.o CMakeFiles/mdrun_objlib.dir/mdrun/mdrun.cpp.o CMakeFiles/mdrun_objlib.dir/mdrun/nonbonded_bench.cpp.o CMakeFiles/view_objlib.dir/view/view.cpp.o  -o ../../bin/gmx  -Wl,-rpath,\"\$ORIGIN/../lib:/opt/plumed/lib\" ../../lib/libgromacs.so.7.0.0 /usr/lib/x86_64-linux-gnu/libdftbplus.a /usr/lib/x86_64-linux-gnu/libdftd3.a /usr/lib/x86_64-linux-gnu/libmudpack.a /lib/x86_64-linux-gnu/liblapack64.a /lib/x86_64-linux-gnu/libblas64.a  /usr/lib/x86_64-linux-gnu/libgfortran.so.5 /usr/lib/x86_64-linux-gnu/libgomp.so.1 -lm /opt/plumed/lib/libplumed.so -ldl /usr/lib/gcc/x86_64-linux-gnu/9/libgomp.so /usr/lib/x86_64-linux-gnu/libpthread.so " > src/programs/CMakeFiles/gmx.dir/link.txt
+
+      cmake --build ${TMPDIR}/gromacs-dftbplus --target all -- -j$(nproc)
+      cmake --build ${TMPDIR}/gromacs-dftbplus --target install -- -j$(nproc)
+
+   done
+        
+   rm -rf ${TMPDIR}/gromacs-dftbplus ${TMPDIR}/gromacs-dftbplus.tar.gz
+
+# Additional shell to run CHARMM-GUI stuff
+%post
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        csh
+%environment
+    export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:/opt/plumed/lib
+%runscript 
+    export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:/opt/plumed/lib
+    LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:/opt/plumed/lib /usr/local/gromacs/bin/gmx "$@"
