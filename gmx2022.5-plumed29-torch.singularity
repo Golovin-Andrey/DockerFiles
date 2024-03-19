@@ -1,0 +1,56 @@
+Bootstrap: docker
+From:  nvidia/cuda:12.2.0-devel-ubuntu22.04 
+
+#%files
+#    /home/domain/data/silwer/gpcr_martini2/scripts/gmx /usr/local/bin/gmx
+
+# Install python3
+# SPlonItYSiAn
+%post 
+    DEBIAN_FRONTEND=noninteractive apt update
+    DEBIAN_FRONTEND=noninteractive apt install -y --no-install-recommends \
+    python3  sudo  ssh build-essential ca-certificates  libblas-dev \
+    liblapack-dev  perl wget liblapack64-dev  libblas64-dev \
+    git xxd  gfortran  unzip tmux vim  libopenmpi-dev  python3-pip
+# Install latest CMAKE
+#
+%post 
+    pip3 install cmake
+
+
+%post
+    TMPDIR=/tmp
+    cd  ${TMPDIR}
+    cd ${SINGULARITY_CONTAINER}/opt ;  wget -q -nc --no-check-certificate -P /opt https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-2.2.0%2Bcpu.zip ; ls -lh
+    cd ${SINGULARITY_CONTAINER}/opt ;  unzip  "libtorch-cxx11-abi-shared-with-deps-2.2.0+cpu.zip" ; rm -f "libtorch-cxx11-abi-shared-with-deps-2.2.0+cpu.zip"
+    echo "export CPATH=/opt/libtorch/include/torch/csrc/api/include/:/opt/libtorch/include/:/opt/libtorch/include/torch:$CPATH ;\
+export INCLUDE=/opt/libtorch/include/torch/csrc/api/include/:/opt/libtorch/include/:/opt/libtorch/include/torch:$INCLUDE ;\
+export LIBRARY_PATH=/opt/libtorch/lib:$LIBRARY_PATH ; export LD_LIBRARY_PATH=/opt/libtorch/lib:$LD_LIBRARY_PATH "  > ${SINGULARITY_CONTAINER}/opt/libtorch/sourceme.sh
+
+%post
+    PLUMED_VERSION=2.9.0
+    mkdir -p ${TMPDIR} && wget -q -nc --no-check-certificate -P ${TMPDIR} https://github.com/plumed/plumed2/releases/download/v${PLUMED_VERSION}/plumed-src-${PLUMED_VERSION}.tgz 
+    mkdir -p ${TMPDIR} && tar -x -f ${TMPDIR}/plumed-src-${PLUMED_VERSION}.tgz -C ${TMPDIR} -z 
+    cd ${TMPDIR}/plumed-${PLUMED_VERSION} 
+    . /opt/libtorch/sourceme.sh 
+    sed -i.back 's/-std=c++14/-std=c++17/' ./configure 
+    ./configure --prefix=${SINGULARITY_CONTAINER}/opt/plumed --enable-libtorch --enable-modules=all 
+    make -j4 
+    make install 
+
+
+%post
+    GMX_VERSION=2022.5
+    wget -q -nc --no-check-certificate -P ${TMPDIR} ftp://ftp.gromacs.org/pub/gromacs/gromacs-${GMX_VERSION}.tar.gz
+    cd ${TMPDIR}/ ; ls ;tar xf  gromacs-${GMX_VERSION}.tar.gz ; cd gromacs-${GMX_VERSION}; 
+    LD_LIBRARY_PATH=${SINGULARITY_CONTAINER}/opt/plumed/lib:${SINGULARITY_CONTAINER}/opt/libtorch/lib ${SINGULARITY_CONTAINER}/opt/plumed/bin/plumed patch -p -e gromacs-2022.5
+    mkdir -p ${TMPDIR}/gromacs-${GMX_VERSION}/build ; cd  ${TMPDIR}/gromacs-${GMX_VERSION}/build 
+    cmake ..  -D GMX_OPENMP=ON -D GMX_MPI=ON -D GMX_GPU=CUDA -D GMX_DOUBLE=OFF -D GMX_BUILD_OWN_FFTW=ON -D CMAKE_INSTALL_PREFIX=${SINGULARITY_CONTAINER}/opt/gromacs 
+    LD_LIBRARY_PATH=${SINGULARITY_CONTAINER}/opt/plumed/lib:${SINGULARITY_CONTAINER}/opt/libtorch/lib make -j4 ; LD_LIBRARY_PATH=${SINGULARITY_CONTAINER}/opt/plumed/lib:${SINGULARITY_CONTAINER}/opt/libtorch/lib  make install 
+
+%environment
+    export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:/opt/plumed/lib
+%runscript
+    export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:/opt/plumed/lib
+    LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:/opt/plumed/lib:/opt/libtorch/lib /opt/gromacs/bin/gmx_mpi "$@"
+
